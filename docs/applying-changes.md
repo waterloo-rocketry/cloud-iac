@@ -6,7 +6,7 @@ Every change to Terraform-managed infrastructure goes through a pull request. CI
 
 1. Create a branch and edit the stack, for example `oci/waterloorocketry/ca-toronto-1/compute.tf`.
 2. Optional: run a plan locally first. See [Running Terraform locally](../README.md#running-terraform-locally).
-3. Open the PR. The `terraform` workflow runs for every stack:
+3. Open the PR. If it changes anything under `oci/`, the `oci-terraform` workflow runs for every OCI stack:
    - `terraform fmt -check`, `init` and `validate`
    - `terraform plan` with the read-only CI user
    - a sticky PR comment, `Terraform plan: <stack> at <commit>`, with the summary line and the full plan. Email addresses are redacted, because the repo is public. If the plan fails, the comment is replaced with `Terraform plan failed`, so an older plan never looks current.
@@ -28,14 +28,14 @@ PRs from forks get no secrets, so their plan fails. Push the branch to this repo
 ## 2. Merge and approve the apply
 
 1. Get one approving review, then merge the PR. The `main` ruleset requires both the review and a passing `oci-plan-status` check. Repository admins can merge without them; use that only when needed.
-2. The merge starts the `terraform` workflow on `main`. It plans again on the merged code, runs the same deletion check, and saves the plan. If this plan fails, nothing is applied, and CI opens a `Terraform plan failed on main: <stack>` issue.
+2. The merge starts the `oci-terraform` workflow on `main`. It plans again on the merged code, runs the same deletion check, and saves the plan. If this plan fails, nothing is applied, and CI opens a `Terraform plan failed on main: <stack>` issue.
 3. The `apply` job then waits for approval in the `oci-apply` environment. The required reviewers are listed in [GitHub settings](github-settings.md#environments).
-4. To approve: open the run (**Actions** > **terraform** > the run for your merge commit), click **Review deployments**, tick `oci-apply`, and click **Approve and deploy**. Before approving, check that the plan on the run's summary page matches the plan you reviewed in the PR.
+4. To approve: open the run (**Actions** > **oci-terraform** > the run for your merge commit), click **Review deployments**, tick `oci-apply`, and click **Approve and deploy**. Before approving, check that the plan on the run's summary page matches the plan you reviewed in the PR.
 
    From a terminal:
 
    ```sh
-   run_id=$(gh run list --workflow terraform.yml --branch main --limit 1 --json databaseId -q '.[0].databaseId')
+   run_id=$(gh run list --workflow oci-terraform.yml --branch main --limit 1 --json databaseId -q '.[0].databaseId')
    gh api "repos/waterloo-rocketry/cloud-iac/actions/runs/$run_id/pending_deployments" \
      --jq '.[] | "\(.environment.name) \(.environment.id)"'
    gh api -X POST "repos/waterloo-rocketry/cloud-iac/actions/runs/$run_id/pending_deployments" \
@@ -44,7 +44,7 @@ PRs from forks get no secrets, so their plan fails. Push the branch to this repo
 
 5. To refuse an apply, click **Reject** instead. Nothing is applied, and the merged change stays on `main` until a later plan is approved, or until a revert PR is merged.
 
-Only merges that touch `oci/**` or `.github/workflows/terraform.yml` start an apply.
+OCI changes are files that match `OCI_PATHS_REGEX` in `oci-terraform.yml`: the OCI stacks and the CI files they use. The workflow runs on every PR, but only plans when the PR changes one of them; otherwise only `oci-plan-status` runs, and passes. Merges to `main` start the workflow, and an apply, only when they change one of them.
 
 ### Merging a stack of PRs
 
@@ -69,7 +69,7 @@ If two merges overlap, the second apply fails with `Saved plan is stale`. That i
 From a terminal:
 
 ```sh
-gh run list --workflow terraform.yml --branch main --limit 5   # recent plans and applies
+gh run list --workflow oci-terraform.yml --branch main --limit 5   # recent plans and applies
 gh run watch <run-id>                                          # follow a running apply
 gh run view <run-id> --log-failed                              # log of the failed steps
 gh issue list --label apply-failed                             # open apply failures
@@ -80,6 +80,6 @@ A successful apply ends with `Apply complete! Resources: X imported, Y added, Z 
 
 ## 4. Check for drift
 
-The `drift` workflow plans every stack once a day (the `cron` line in `drift.yml` sets the time) with the read-only user. When the cloud no longer matches `main`, it opens an issue titled `Drift detected: <stack>`, or comments on the open one. To run it now: **Actions** > **drift** > **Run workflow**, or `gh workflow run drift.yml`.
+The `oci-drift` workflow plans every OCI stack once a day (the `cron` line in `oci-drift.yml` sets the time) with the read-only user. When the cloud no longer matches `main`, it opens an issue titled `Drift detected: <stack>`, or comments on the open one. To run it now: **Actions** > **oci-drift** > **Run workflow**, or `gh workflow run oci-drift.yml`.
 
 To fix drift, either open a PR that makes the code match the change, or undo the change in the console. Close the issue when the next drift run passes.

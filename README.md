@@ -19,7 +19,7 @@ To add a stack, create a folder with a `backend.tf` whose `key` matches the fold
 1. Open a PR. CI plans every stack with the read-only `waterloorocketry-terraform-ci-plan` user and posts each plan as a PR comment.
 2. If a plan deletes or replaces a resource, CI fails unless the PR has the `allow-destroy` label.
 3. After merge, CI plans again on `main`, waits for approval in the `oci-apply` environment, then applies that saved plan with `waterloorocketry-terraform-ci-apply`.
-4. CI posts the result as a comment on the merged PR. A daily `drift` workflow opens an issue if the cloud no longer matches `main`.
+4. CI posts the result as a comment on the merged PR. A daily `oci-drift` workflow opens an issue if the cloud no longer matches `main`.
 
 Do not change Terraform-managed resources in the OCI console. The next plan will try to undo the change.
 

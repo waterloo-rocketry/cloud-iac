@@ -74,7 +74,7 @@ If all 5 retries failed, the state still holds the old contents. Updated and del
 
 ## Drift
 
-The `drift` workflow opened `Drift detected: <stack>`. The run log shows the plan.
+The `oci-drift` workflow opened `Drift detected: <stack>`. The run log shows the plan.
 
 | The plan shows | Likely cause | Fix |
 | --- | --- | --- |
