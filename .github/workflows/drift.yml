@@ -61,25 +61,13 @@ jobs:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
-      - name: Write OCI config
-        env:
-          OCI_USER_OCID: ${{ vars.OCI_USER_OCID }}
-          OCI_FINGERPRINT: ${{ vars.OCI_FINGERPRINT }}
-          OCI_TENANCY_OCID: ${{ vars.OCI_TENANCY_OCID }}
-          OCI_REGION: ${{ vars.OCI_REGION }}
-          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
-        run: |
-          mkdir -p ~/.oci
-          printf '%s\n' "$OCI_PRIVATE_KEY" > ~/.oci/key.pem
-          cat > ~/.oci/config <<EOF
-          [DEFAULT]
-          user=$OCI_USER_OCID
-          fingerprint=$OCI_FINGERPRINT
-          tenancy=$OCI_TENANCY_OCID
-          region=$OCI_REGION
-          key_file=~/.oci/key.pem
-          EOF
-          chmod 600 ~/.oci/key.pem ~/.oci/config
+      - uses: ./.github/actions/write-oci-config
+        with:
+          user-ocid: ${{ vars.OCI_USER_OCID }}
+          fingerprint: ${{ vars.OCI_FINGERPRINT }}
+          tenancy-ocid: ${{ vars.OCI_TENANCY_OCID }}
+          region: ${{ vars.OCI_REGION }}
+          private-key: ${{ secrets.OCI_PRIVATE_KEY }}
 
       - run: terraform init -input=false -no-color 2>&1 | sed -E "$REDACT_EMAILS"
 
