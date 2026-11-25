@@ -29,3 +29,23 @@ import {
   to = oci_core_default_dhcp_options.main
   id = "ocid1.dhcpoptions.oc1.ca-toronto-1.aaaaaaaa3foqse4uibrxui6rtdpzf5s432a75tryh3hhocqgafuqe3v5zo4a"
 }
+
+import {
+  to = oci_core_instance.server
+  id = "ocid1.instance.oc1.ca-toronto-1.an2g6ljrxscp5dacdlziyrwan6wjlpepm6hhkrpkcfopdjwdr6xvpugnjwwa"
+}
+
+import {
+  to = oci_core_instance.daq_staging
+  id = "ocid1.instance.oc1.ca-toronto-1.an2g6ljrxscp5dacbgnttmhlfzk2z7omdohrpupumbi4tlibtrmy2pugc6ga"
+}
+
+import {
+  to = oci_core_image.debian_13_arm64
+  id = "ocid1.image.oc1.ca-toronto-1.aaaaaaaaodoh6bw2zz5hr6ebtqshk3jt5jd7rnpgc7yldf75acp74v2ixqkq"
+}
+
+import {
+  to = oci_core_compute_image_capability_schema.debian_13_arm64
+  id = "ocid1.computeimgcapschema.oc1.ca-toronto-1.aaaaaaaauhwqboqasjz5xqdnxvbci5ryhqo3scxejnqndlzxpotwqxj3q65q"
+}
