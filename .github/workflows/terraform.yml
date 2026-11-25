@@ -1,0 +1,308 @@
+name: terraform
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+  push:
+    branches: [main]
+    paths:
+      - "oci/**"
+      - ".github/workflows/terraform.yml"
+
+permissions:
+  contents: read
+
+env:
+  TERRAFORM_VERSION: 1.17.2
+  # The repo is public, so plan and apply output has email addresses removed.
+  # Oracle-Tags.CreatedBy and the budget alert recipients contain them.
+  REDACT_EMAILS: s/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]+/<email redacted>/g
+
+# An explicit "shell: bash" runs steps with pipefail, so "terraform ... | sed" fails when terraform fails.
+# Jobs that set their own defaults must repeat it: job defaults replace these.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  find-stacks:
+    runs-on: ubuntu-latest
+    outputs:
+      stacks: ${{ steps.find.outputs.stacks }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # A stack is any folder under oci/ that has a backend.tf.
+      # The id is the path with dashes, because artifact names cannot contain slashes.
+      - id: find
+        run: |
+          stacks=$(find oci -name backend.tf -exec dirname {} \; | sort \
+            | jq -R '{path: ., id: gsub("/"; "-")}' | jq -sc .)
+          echo "stacks=$stacks" >> "$GITHUB_OUTPUT"
+
+  plan:
+    needs: find-stacks
+    runs-on: ubuntu-latest
+    environment: oci-plan
+    env:
+      STACK_PATH: ${{ matrix.stack.path }}
+      # The commit the plan belongs to: the PR head for PRs, the merge commit on main.
+      COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: ${{ fromJSON(needs.find-stacks.outputs.stacks) }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ matrix.stack.path }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Write OCI config
+        env:
+          OCI_USER_OCID: ${{ vars.OCI_USER_OCID }}
+          OCI_FINGERPRINT: ${{ vars.OCI_FINGERPRINT }}
+          OCI_TENANCY_OCID: ${{ vars.OCI_TENANCY_OCID }}
+          OCI_REGION: ${{ vars.OCI_REGION }}
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.oci
+          printf '%s\n' "$OCI_PRIVATE_KEY" > ~/.oci/key.pem
+          cat > ~/.oci/config <<EOF
+          [DEFAULT]
+          user=$OCI_USER_OCID
+          fingerprint=$OCI_FINGERPRINT
+          tenancy=$OCI_TENANCY_OCID
+          region=$OCI_REGION
+          key_file=~/.oci/key.pem
+          EOF
+          chmod 600 ~/.oci/key.pem ~/.oci/config
+
+      # Terraform writes errors to stderr, so 2>&1 sends them through the redaction too.
+      - run: terraform fmt -check -recursive
+      - run: terraform init -input=false -no-color 2>&1 | sed -E "$REDACT_EMAILS"
+      - run: terraform validate -no-color 2>&1 | sed -E "$REDACT_EMAILS"
+
+      # Plans never write state, so they skip the lock. The plan user then only needs to read
+      # the state bucket, and plans cannot block each other or an apply. The apply still
+      # rejects a saved plan if the state changed after the plan was made.
+      - run: terraform plan -input=false -lock=false -no-color -out=tfplan 2>&1 | sed -E "$REDACT_EMAILS"
+
+      - id: render
+        name: Render plan
+        run: |
+          terraform show -no-color tfplan 2>&1 | sed -E "$REDACT_EMAILS" > plan.txt
+          summary=$(grep -E '^(Plan:|No changes)' plan.txt || echo "See the full plan.")
+          # GitHub comments are limited to 65,536 characters.
+          comment_limit=60000
+          {
+            echo "### Terraform plan: \`$STACK_PATH\` at ${COMMIT_SHA:0:7}"
+            echo
+            echo "**$summary**"
+            echo
+            echo "<details><summary>Full plan</summary>"
+            echo
+            echo '```'
+            head -c "$comment_limit" plan.txt
+            echo '```'
+            if [ "$(wc -c < plan.txt)" -gt "$comment_limit" ]; then
+              echo "(Truncated. The full plan is in the run log: $RUN_URL)"
+            fi
+            echo "</details>"
+          } > plan-comment.md
+          cat plan-comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - if: github.event_name == 'pull_request'
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: ${{ matrix.stack.path }}
+          path: ${{ matrix.stack.path }}/plan-comment.md
+
+      # If init, validate or plan failed, replace the plan comment so an older plan
+      # does not look current.
+      - if: failure() && github.event_name == 'pull_request' && steps.render.outcome != 'success'
+        run: |
+          {
+            echo "### Terraform plan failed: \`$STACK_PATH\` at ${COMMIT_SHA:0:7}"
+            echo
+            echo "**No plan was made for this commit. See the run log: $RUN_URL**"
+          } > plan-comment.md
+
+      - if: failure() && github.event_name == 'pull_request' && steps.render.outcome != 'success'
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          header: ${{ matrix.stack.path }}
+          path: ${{ matrix.stack.path }}/plan-comment.md
+
+      # Deleting or replacing a resource needs the allow-destroy label on the PR.
+      # A replacement shows up as a delete plus a create, so it is caught too.
+      - name: Block deletions without allow-destroy
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_HAS_ALLOW_DESTROY: ${{ contains(github.event.pull_request.labels.*.name, 'allow-destroy') }}
+        run: |
+          deleted=$(terraform show -json tfplan \
+            | jq -r '[.resource_changes[]? | select(.change.actions | index("delete")) | .address] | join(", ")')
+          if [ -z "$deleted" ]; then
+            exit 0
+          fi
+
+          if [ "$GITHUB_EVENT_NAME" = "pull_request" ]; then
+            allowed=$PR_HAS_ALLOW_DESTROY
+          else
+            allowed=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" \
+              --jq '[.[].labels[].name] | index("allow-destroy") != null')
+          fi
+
+          if [ "$allowed" = "true" ]; then
+            echo "::warning::allow-destroy is set. This plan deletes: $deleted"
+            exit 0
+          fi
+          echo "::error::This plan deletes or replaces: $deleted. Add the allow-destroy label to the PR if that is intended."
+          exit 1
+
+      # Artifacts of a public repo can be downloaded by anyone, and a saved plan holds
+      # state and variable values. Only the encrypted copy is uploaded.
+      - if: github.event_name == 'push'
+        env:
+          TF_ARTIFACT_ENCRYPTION_KEY: ${{ secrets.TF_ARTIFACT_ENCRYPTION_KEY }}
+        run: openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:TF_ARTIFACT_ENCRYPTION_KEY -in tfplan -out tfplan.enc
+
+      - if: github.event_name == 'push'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tfplan-${{ matrix.stack.id }}
+          path: ${{ matrix.stack.path }}/tfplan.enc
+          retention-days: 7
+
+      # A failed plan on main skips the apply, so report it the same way as a failed apply.
+      - if: failure() && github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "Terraform plan failed on main: $STACK_PATH" \
+            --label apply-failed \
+            --body "The plan for \`$STACK_PATH\` at $GITHUB_SHA failed, so nothing was applied: $RUN_URL"
+
+  # The one check that branch rules require. It always reports a result, so a PR is never
+  # stuck waiting for a check that did not run. It fails if any stack's plan did not succeed.
+  plan-status:
+    name: oci-plan-status
+    if: always()
+    needs: [find-stacks, plan]
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          FIND_STACKS_RESULT: ${{ needs.find-stacks.result }}
+          PLAN_RESULT: ${{ needs.plan.result }}
+        run: |
+          echo "find-stacks: $FIND_STACKS_RESULT, plan: $PLAN_RESULT"
+          if [ "$FIND_STACKS_RESULT" != "success" ] || [ "$PLAN_RESULT" != "success" ]; then
+            exit 1
+          fi
+
+  apply:
+    needs: [find-stacks, plan]
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    environment: oci-apply
+    env:
+      STACK_PATH: ${{ matrix.stack.path }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+    permissions:
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: ${{ fromJSON(needs.find-stacks.outputs.stacks) }}
+    # One apply per stack at a time. A running apply is never cancelled. If more merges queue up,
+    # GitHub keeps only the newest pending apply, whose plan already includes the earlier merges.
+    concurrency:
+      group: terraform-apply-${{ matrix.stack.id }}
+      cancel-in-progress: false
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ matrix.stack.path }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Write OCI config
+        env:
+          OCI_USER_OCID: ${{ vars.OCI_USER_OCID }}
+          OCI_FINGERPRINT: ${{ vars.OCI_FINGERPRINT }}
+          OCI_TENANCY_OCID: ${{ vars.OCI_TENANCY_OCID }}
+          OCI_REGION: ${{ vars.OCI_REGION }}
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.oci
+          printf '%s\n' "$OCI_PRIVATE_KEY" > ~/.oci/key.pem
+          cat > ~/.oci/config <<EOF
+          [DEFAULT]
+          user=$OCI_USER_OCID
+          fingerprint=$OCI_FINGERPRINT
+          tenancy=$OCI_TENANCY_OCID
+          region=$OCI_REGION
+          key_file=~/.oci/key.pem
+          EOF
+          chmod 600 ~/.oci/key.pem ~/.oci/config
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tfplan-${{ matrix.stack.id }}
+          path: ${{ matrix.stack.path }}
+
+      - env:
+          TF_ARTIFACT_ENCRYPTION_KEY: ${{ secrets.TF_ARTIFACT_ENCRYPTION_KEY }}
+        run: openssl enc -d -aes-256-cbc -pbkdf2 -pass env:TF_ARTIFACT_ENCRYPTION_KEY -in tfplan.enc -out tfplan
+
+      - run: terraform init -input=false -no-color 2>&1 | sed -E "$REDACT_EMAILS"
+
+      # Terraform refuses a saved plan whose state has changed since it was made.
+      - run: terraform apply -input=false -lock-timeout=5m -no-color tfplan 2>&1 | sed -E "$REDACT_EMAILS"
+
+      # Terraform writes errored.tfstate when an apply changed OCI but could not save state.
+      # The usual cause is a short Object Storage error, so retry the upload before giving up.
+      # The file is not uploaded as an artifact: the README explains how to recover without it.
+      - if: failure() && hashFiles(format('{0}/errored.tfstate', matrix.stack.path)) != ''
+        run: |
+          for attempt in 1 2 3 4 5; do
+            if terraform state push -lock-timeout=1m errored.tfstate 2>&1 | sed -E "$REDACT_EMAILS"; then
+              echo "::notice::Saved errored.tfstate to the backend on attempt $attempt."
+              exit 0
+            fi
+            if [ "$attempt" -lt 5 ]; then
+              sleep $((attempt * 30))
+            fi
+          done
+          echo "::error::Could not save state after 5 attempts. See \"When an apply fails\" in the README."
+          exit 1
+
+      - if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue create \
+            --title "Terraform apply failed: $STACK_PATH" \
+            --label apply-failed \
+            --body "The apply for \`$STACK_PATH\` at $GITHUB_SHA failed: $RUN_URL
+
+          See the README section \"When an apply fails\"."
