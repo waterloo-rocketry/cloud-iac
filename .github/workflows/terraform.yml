@@ -49,6 +49,7 @@ jobs:
       # The commit the plan belongs to: the PR head for PRs, the merge commit on main.
       COMMIT_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      TF_VAR_budget_alert_recipients: ${{ secrets.BUDGET_ALERT_RECIPIENTS }}
     permissions:
       contents: read
       issues: write
@@ -221,6 +222,7 @@ jobs:
     env:
       STACK_PATH: ${{ matrix.stack.path }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      TF_VAR_budget_alert_recipients: ${{ secrets.BUDGET_ALERT_RECIPIENTS }}
     permissions:
       contents: read
       issues: write
