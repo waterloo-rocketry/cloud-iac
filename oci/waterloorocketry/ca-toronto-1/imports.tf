@@ -1,0 +1,31 @@
+# Adopts resources created in the OCI console. Remove these blocks after they are applied.
+
+import {
+  to = oci_core_vcn.main
+  id = "ocid1.vcn.oc1.ca-toronto-1.amaaaaaaxscp5daahxkf42v7ovgpbh4hbyw4sagkjtyl7wafggakfeuou6rq"
+}
+
+import {
+  to = oci_core_subnet.public
+  id = "ocid1.subnet.oc1.ca-toronto-1.aaaaaaaa2iilnhkw63b4r2slslm6pjooysajmes2uum2fggpce74bninc2xq"
+}
+
+import {
+  to = oci_core_internet_gateway.main
+  id = "ocid1.internetgateway.oc1.ca-toronto-1.aaaaaaaaxdpcohrotpsm27s24fgnkxsvi3qjixxic2ng7gvc6s2ghlfkg3ya"
+}
+
+import {
+  to = oci_core_default_route_table.main
+  id = "ocid1.routetable.oc1.ca-toronto-1.aaaaaaaap7k2kx6ko4ubvemc6ppu5akckzf3hkvxdasvahugnivxydj5tdaa"
+}
+
+import {
+  to = oci_core_default_security_list.main
+  id = "ocid1.securitylist.oc1.ca-toronto-1.aaaaaaaaewurqd7vmutguzrmemvesblchvuwg2nqjf4ko3vtlaj3yzj2irca"
+}
+
+import {
+  to = oci_core_default_dhcp_options.main
+  id = "ocid1.dhcpoptions.oc1.ca-toronto-1.aaaaaaaa3foqse4uibrxui6rtdpzf5s432a75tryh3hhocqgafuqe3v5zo4a"
+}
