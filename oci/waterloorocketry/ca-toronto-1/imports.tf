@@ -49,3 +49,28 @@ import {
   to = oci_core_compute_image_capability_schema.debian_13_arm64
   id = "ocid1.computeimgcapschema.oc1.ca-toronto-1.aaaaaaaauhwqboqasjz5xqdnxvbci5ryhqo3scxejnqndlzxpotwqxj3q65q"
 }
+
+import {
+  to = oci_objectstorage_bucket.misc_services
+  id = "n/yzpwk4utrxdv/b/waterloorocketry-misc-svc-ressources"
+}
+
+import {
+  to = oci_budget_budget.tenancy_monthly
+  id = "ocid1.budget.oc1.ca-toronto-1.amaaaaaaxscp5daakn6wx24ixoqixrwxyxqh4k73pj5oh5xotcybke326eaq"
+}
+
+import {
+  to = oci_budget_alert_rule.actual_over_budget
+  id = "budgets/ocid1.budget.oc1.ca-toronto-1.amaaaaaaxscp5daakn6wx24ixoqixrwxyxqh4k73pj5oh5xotcybke326eaq/alertRules/ocid1.alertrule.oc1.ca-toronto-1.amaaaaaaxscp5daamtmyomtiqipm2qd3l2v7gmbqpacevi6qaolr7o4i7vjq"
+}
+
+import {
+  to = oci_budget_alert_rule.forecast_at_75_percent
+  id = "budgets/ocid1.budget.oc1.ca-toronto-1.amaaaaaaxscp5daakn6wx24ixoqixrwxyxqh4k73pj5oh5xotcybke326eaq/alertRules/ocid1.alertrule.oc1.ca-toronto-1.amaaaaaaxscp5daaehhvlg5depasuakbnf4eztn2m2bs3hdlb5ic3f4e4xaa"
+}
+
+import {
+  to = oci_budget_alert_rule.forecast_at_150_percent
+  id = "budgets/ocid1.budget.oc1.ca-toronto-1.amaaaaaaxscp5daakn6wx24ixoqixrwxyxqh4k73pj5oh5xotcybke326eaq/alertRules/ocid1.alertrule.oc1.ca-toronto-1.amaaaaaaxscp5daabd7osrgizwgnbyp46jkvp2ja6t6rztcft4jftr2t2a5a"
+}

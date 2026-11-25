@@ -31,7 +31,10 @@ Do not change Terraform-managed resources in the OCI console. The next plan will
 
 You need Terraform 1.17 and an OCI API key in the `DEFAULT` profile of `~/.oci/config`.
 
+The budget alert recipients are not in the repo. Set them as a JSON list, in the same order as the `BUDGET_ALERT_RECIPIENTS` repository secret:
+
 ```sh
+export TF_VAR_budget_alert_recipients='["first@example.com", "second@example.com"]'
 cd oci/waterloorocketry/ca-toronto-1
 terraform init
 terraform plan
