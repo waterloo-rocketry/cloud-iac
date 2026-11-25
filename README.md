@@ -27,6 +27,10 @@ To add a stack, create a folder with a `backend.tf` whose `key` matches the fold
 
 Do not change Terraform-managed resources in the OCI console. The next plan will try to undo the change.
 
+## Drift detection
+
+The `drift` workflow plans every stack each day at 09:17 UTC with the read-only user. If the real resources no longer match `main`, it opens an issue titled `Drift detected: <stack>`, or comments on the open one. Fix drift by opening a PR that matches the change, or by undoing the console change. You can also start the workflow by hand from the Actions tab.
+
 ## Running Terraform locally
 
 You need Terraform 1.17 and an OCI API key in the `DEFAULT` profile of `~/.oci/config`.
