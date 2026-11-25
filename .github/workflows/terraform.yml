@@ -215,6 +215,7 @@ jobs:
     permissions:
       contents: read
       issues: write
+      pull-requests: write
     strategy:
       fail-fast: false
       matrix:
@@ -256,7 +257,61 @@ jobs:
       - run: terraform init -input=false -no-color 2>&1 | sed -E "$REDACT_EMAILS"
 
       # Terraform refuses a saved plan whose state has changed since it was made.
-      - run: terraform apply -input=false -lock-timeout=5m -no-color tfplan 2>&1 | sed -E "$REDACT_EMAILS"
+      - id: apply
+        run: terraform apply -input=false -lock-timeout=5m -no-color tfplan 2>&1 | sed -E "$REDACT_EMAILS" | tee apply.txt
+
+      # Report the result on the run page and on the merged PR, whether the apply passed or failed.
+      # Reporting must not turn a successful apply into a failed job, so these steps may fail.
+      - name: Summarize apply
+        if: always() && steps.apply.outcome != 'skipped'
+        continue-on-error: true
+        env:
+          APPLY_OUTCOME: ${{ steps.apply.outcome }}
+        run: |
+          if [ "$APPLY_OUTCOME" = "success" ]; then
+            result=$(grep -E '^Apply complete!' apply.txt || echo "Apply complete.")
+            heading="Terraform apply succeeded"
+          else
+            result="Apply failed. See the run log and the apply-failed issue: $RUN_URL"
+            heading="Terraform apply failed"
+          fi
+          # GitHub comments are limited to 65,536 characters.
+          comment_limit=60000
+          {
+            echo "### $heading: \`$STACK_PATH\`"
+            echo
+            echo "**$result**"
+            echo
+            echo "Commit $GITHUB_SHA, [run log]($RUN_URL)"
+            echo
+            echo "<details><summary>Full apply output</summary>"
+            echo
+            echo '```'
+            head -c "$comment_limit" apply.txt
+            echo '```'
+            if [ "$(wc -c < apply.txt)" -gt "$comment_limit" ]; then
+              echo "(Truncated. The full output is in the run log.)"
+            fi
+            echo "</details>"
+          } > apply-comment.md
+          cat apply-comment.md >> "$GITHUB_STEP_SUMMARY"
+
+      - id: merged-pr
+        if: always() && steps.apply.outcome != 'skipped'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          number=$(gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --jq '.[0].number // empty')
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+
+      - if: always() && steps.merged-pr.outputs.number != ''
+        continue-on-error: true
+        uses: marocchino/sticky-pull-request-comment@5770ad5eb8f42dd2c4f34da00c94c5381e49af88 # v3.0.5
+        with:
+          number: ${{ steps.merged-pr.outputs.number }}
+          header: apply-${{ matrix.stack.path }}
+          path: ${{ matrix.stack.path }}/apply-comment.md
 
       # Terraform writes errored.tfstate when an apply changed OCI but could not save state.
       # The usual cause is a short Object Storage error, so retry the upload before giving up.

@@ -24,6 +24,7 @@ To add a stack, create a folder with a `backend.tf` whose `key` matches the fold
 2. If a plan deletes or replaces a resource, CI fails unless the PR has the `allow-destroy` label.
 3. After merge, CI plans again on `main` and saves the plan.
 4. The `apply` job waits for approval in the `oci-apply` environment, then applies that saved plan with `waterloorocketry-terraform-ci-apply`.
+5. CI posts the apply result as a comment on the merged PR and on the run's summary page.
 
 Do not change Terraform-managed resources in the OCI console. The next plan will try to undo the change.
 
