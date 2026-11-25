@@ -1,0 +1,42 @@
+name: Write OCI config
+description: Write ~/.oci/config and an API key file, which the OCI provider and backend read as the DEFAULT profile.
+
+inputs:
+  user-ocid:
+    description: OCID of the OCI user that signs the API requests
+    required: true
+  fingerprint:
+    description: Fingerprint of that user's API public key
+    required: true
+  tenancy-ocid:
+    description: OCID of the tenancy
+    required: true
+  region:
+    description: OCI region identifier, for example ca-toronto-1
+    required: true
+  private-key:
+    description: PEM-encoded API private key
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      env:
+        OCI_USER_OCID: ${{ inputs.user-ocid }}
+        OCI_FINGERPRINT: ${{ inputs.fingerprint }}
+        OCI_TENANCY_OCID: ${{ inputs.tenancy-ocid }}
+        OCI_REGION: ${{ inputs.region }}
+        OCI_PRIVATE_KEY: ${{ inputs.private-key }}
+      run: |
+        mkdir -p ~/.oci
+        printf '%s\n' "$OCI_PRIVATE_KEY" > ~/.oci/key.pem
+        cat > ~/.oci/config <<EOF
+        [DEFAULT]
+        user=$OCI_USER_OCID
+        fingerprint=$OCI_FINGERPRINT
+        tenancy=$OCI_TENANCY_OCID
+        region=$OCI_REGION
+        key_file=~/.oci/key.pem
+        EOF
+        chmod 600 ~/.oci/key.pem ~/.oci/config
