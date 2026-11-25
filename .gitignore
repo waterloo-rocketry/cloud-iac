@@ -10,6 +10,8 @@ tfplan
 *.tfplan
 plan.txt
 plan-comment.md
+apply.txt
+apply-comment.md
 
 # Local variable overrides
 *.auto.tfvars
