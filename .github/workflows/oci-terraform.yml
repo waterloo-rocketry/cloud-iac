@@ -1,13 +1,20 @@
-name: terraform
+name: oci-terraform
 
+# Plans and applies the OCI stacks under oci/. Other providers get their own workflow.
+
+# OCI changes are files under these paths. Keep this list and OCI_PATHS_REGEX below in sync.
 on:
+  # No path filter on PRs: the required oci-plan-status check must report on every PR.
+  # The changes job decides whether a PR needs an OCI plan.
   pull_request:
     types: [opened, synchronize, reopened, labeled, unlabeled]
+  # Only merges that change OCI files start a plan and an apply.
   push:
     branches: [main]
     paths:
       - "oci/**"
-      - ".github/workflows/terraform.yml"
+      - ".github/workflows/oci-terraform.yml"
+      - ".github/actions/write-oci-config/**"
 
 permissions:
   contents: read
@@ -16,7 +23,7 @@ env:
   TERRAFORM_VERSION: 1.17.2
   # The repo is public, so plan and apply output has email addresses removed.
   # Oracle-Tags.CreatedBy and the budget alert recipients contain them.
-  # Keep this rule identical to REDACT_EMAILS in drift.yml.
+  # Keep this rule identical to REDACT_EMAILS in oci-drift.yml.
   REDACT_EMAILS: s/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]+/<email redacted>/g
 
 # An explicit "shell: bash" runs steps with pipefail, so "terraform ... | sed" fails when terraform fails.
@@ -26,7 +33,35 @@ defaults:
     shell: bash
 
 jobs:
+  changes:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      oci: ${{ steps.check.outputs.oci }}
+    steps:
+      - id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          OCI_PATHS_REGEX: ^(oci/|\.github/workflows/oci-terraform\.yml$|\.github/actions/write-oci-config/)
+        run: |
+          # Pushes to main only start this workflow when OCI files changed.
+          if [ "$GITHUB_EVENT_NAME" != "pull_request" ]; then
+            echo "oci=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed_files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files" --jq '.[].filename')
+          if grep -qE "$OCI_PATHS_REGEX" <<< "$changed_files"; then
+            echo "oci=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "oci=false" >> "$GITHUB_OUTPUT"
+          fi
+
   find-stacks:
+    needs: changes
+    if: needs.changes.outputs.oci == 'true'
     runs-on: ubuntu-latest
     outputs:
       stacks: ${{ steps.find.outputs.stacks }}
@@ -191,14 +226,23 @@ jobs:
   plan-status:
     name: oci-plan-status
     if: always()
-    needs: [find-stacks, plan]
+    needs: [changes, find-stacks, plan]
     runs-on: ubuntu-latest
     steps:
       - env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          OCI_CHANGED: ${{ needs.changes.outputs.oci }}
           FIND_STACKS_RESULT: ${{ needs.find-stacks.result }}
           PLAN_RESULT: ${{ needs.plan.result }}
         run: |
-          echo "find-stacks: $FIND_STACKS_RESULT, plan: $PLAN_RESULT"
+          echo "changes: $CHANGES_RESULT (oci=$OCI_CHANGED), find-stacks: $FIND_STACKS_RESULT, plan: $PLAN_RESULT"
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            exit 1
+          fi
+          if [ "$OCI_CHANGED" != "true" ]; then
+            echo "No OCI files changed, so no plan is needed."
+            exit 0
+          fi
           if [ "$FIND_STACKS_RESULT" != "success" ] || [ "$PLAN_RESULT" != "success" ]; then
             exit 1
           fi

@@ -70,7 +70,7 @@ Rotate a CI user's key when it may have leaked, or when someone who had it leave
    gh variable set OCI_FINGERPRINT --env oci-plan --body "<new fingerprint>"
    ```
 
-4. Check that the key works: for the plan user, re-run the latest `terraform` workflow run, or start the `drift` workflow. For the apply user, the next apply is the check.
+4. Check that the key works: for the plan user, re-run the latest `oci-terraform` workflow run, or start the `oci-drift` workflow. For the apply user, the next apply is the check.
 5. Delete the old key from the user's **API keys** list.
 6. Delete `ci-key.pem` and `ci-key-public.pem` from your machine.
 
