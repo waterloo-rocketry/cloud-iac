@@ -1,0 +1,20 @@
+# Terraform working files
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Saved plans and CI plan output
+tfplan
+*.tfplan
+plan.txt
+plan-comment.md
+
+# Local variable overrides
+*.auto.tfvars
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+*.enc
