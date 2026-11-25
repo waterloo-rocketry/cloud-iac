@@ -327,7 +327,7 @@ jobs:
               sleep $((attempt * 30))
             fi
           done
-          echo "::error::Could not save state after 5 attempts. See \"When an apply fails\" in the README."
+          echo "::error::Could not save state after 5 attempts. See docs/oci/troubleshooting.md, \"Failed to save state\"."
           exit 1
 
       - if: failure()
@@ -339,4 +339,4 @@ jobs:
             --label apply-failed \
             --body "The apply for \`$STACK_PATH\` at $GITHUB_SHA failed: $RUN_URL
 
-          See the README section \"When an apply fails\"."
+          See docs/oci/troubleshooting.md, \"The apply fails\"."
