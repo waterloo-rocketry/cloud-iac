@@ -1,0 +1,117 @@
+name: drift
+
+on:
+  schedule:
+    - cron: "17 9 * * *" # daily at 09:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  TERRAFORM_VERSION: 1.17.2
+  # The repo is public, so plan output has email addresses removed.
+  # Keep this rule identical to REDACT_EMAILS in terraform.yml.
+  REDACT_EMAILS: s/[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]+/<email redacted>/g
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  find-stacks:
+    runs-on: ubuntu-latest
+    outputs:
+      stacks: ${{ steps.find.outputs.stacks }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Same stack discovery as terraform.yml.
+      - id: find
+        run: |
+          stacks=$(find oci -name backend.tf -exec dirname {} \; | sort \
+            | jq -R '{path: ., id: gsub("/"; "-")}' | jq -sc .)
+          echo "stacks=$stacks" >> "$GITHUB_OUTPUT"
+
+  plan:
+    needs: find-stacks
+    runs-on: ubuntu-latest
+    environment: oci-plan
+    env:
+      STACK_PATH: ${{ matrix.stack.path }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      TF_VAR_budget_alert_recipients: ${{ secrets.BUDGET_ALERT_RECIPIENTS }}
+    permissions:
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        stack: ${{ fromJSON(needs.find-stacks.outputs.stacks) }}
+    # Job defaults replace the workflow defaults, so the shell is repeated here.
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ matrix.stack.path }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Write OCI config
+        env:
+          OCI_USER_OCID: ${{ vars.OCI_USER_OCID }}
+          OCI_FINGERPRINT: ${{ vars.OCI_FINGERPRINT }}
+          OCI_TENANCY_OCID: ${{ vars.OCI_TENANCY_OCID }}
+          OCI_REGION: ${{ vars.OCI_REGION }}
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+        run: |
+          mkdir -p ~/.oci
+          printf '%s\n' "$OCI_PRIVATE_KEY" > ~/.oci/key.pem
+          cat > ~/.oci/config <<EOF
+          [DEFAULT]
+          user=$OCI_USER_OCID
+          fingerprint=$OCI_FINGERPRINT
+          tenancy=$OCI_TENANCY_OCID
+          region=$OCI_REGION
+          key_file=~/.oci/key.pem
+          EOF
+          chmod 600 ~/.oci/key.pem ~/.oci/config
+
+      - run: terraform init -input=false -no-color 2>&1 | sed -E "$REDACT_EMAILS"
+
+      # -detailed-exitcode: 0 means no changes, 2 means drift, anything else is an error.
+      # The plan never writes state, so it skips the lock and cannot block an apply.
+      - id: plan
+        run: |
+          set +e
+          terraform plan -input=false -lock=false -no-color -detailed-exitcode 2>&1 \
+            | sed -E "$REDACT_EMAILS" > plan.txt
+          exitcode=${PIPESTATUS[0]}
+          set -e
+          cat plan.txt
+          echo "exitcode=$exitcode" >> "$GITHUB_OUTPUT"
+          if [ "$exitcode" -ne 0 ] && [ "$exitcode" -ne 2 ]; then
+            exit 1
+          fi
+
+      # One open issue per stack. Later runs comment on it until someone closes it.
+      - if: steps.plan.outputs.exitcode == '2'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          issue_title="Drift detected: $STACK_PATH"
+          summary=$(grep -E '^Plan:' plan.txt)
+          body="The real resources no longer match \`$STACK_PATH\` on main. **$summary** The full plan is in the run log: $RUN_URL
+
+          If a merged change is still waiting for its apply approval, this is expected and clears after the apply. Otherwise, open a PR that matches the new state, or undo the change in the console."
+          issue=$(gh issue list --label drift --state open --json number,title \
+            --jq "map(select(.title == \"$issue_title\")) | .[0].number // empty")
+          if [ -n "$issue" ]; then
+            gh issue comment "$issue" --body "$body"
+          else
+            gh issue create --title "$issue_title" --label drift --body "$body"
+          fi
